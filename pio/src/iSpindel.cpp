@@ -465,6 +465,8 @@ bool uploadData(uint8_t service)
     sender.add("temperature", Temperatur);
     sender.add("battery", Volt);
     sender.add("gravity", Gravity);
+    sender.add("interval", my_sleeptime);
+    sender.add("RSSI", WiFi.RSSI());
     SerialOut(F("\ncalling Ubidots"));
     return sender.sendUbidots(my_token, my_name);
   }
@@ -483,6 +485,7 @@ bool uploadData(uint8_t service)
     sender.add("battery", Volt);
     sender.add("gravity", Gravity);
     sender.add("interval", my_sleeptime);
+    sender.add("RSSI", WiFi.RSSI());
 
     if (service == DTHTTP)
     {
