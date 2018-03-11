@@ -34,6 +34,10 @@ DeviceAddress tempDeviceAddress;
 Ticker flasher;
 RunningMedian samples = RunningMedian(MEDIANROUNDS);
 
+#define TEMP_CELSIUS      0
+#define TEMP_FAHRENHEIT   1
+#define TEMP_KELVIN       2
+
 DoubleResetDetector drd(DRD_TIMEOUT, DRD_ADDRESS);
 
 #ifdef USE_DMP
@@ -63,6 +67,7 @@ char my_token[TKIDSIZE];
 char my_name[TKIDSIZE] = "iSpindel000";
 char my_server[TKIDSIZE];
 char my_url[TKIDSIZE];
+char my_db[TKIDSIZE] = "ispindel";
 char my_polynominal[70] = "-0.00031*tilt^2+0.557*tilt-14.054";
 
 String my_ssid;
@@ -72,13 +77,14 @@ uint32_t my_sleeptime = 15 * 60;
 uint16_t my_port = 80;
 float my_vfact = ADCDIVISOR;
 int16_t my_aX = UNINIT, my_aY = UNINIT, my_aZ = UNINIT;
+uint8_t my_tempscale = TEMP_CELSIUS;
 
 uint32_t DSreqTime;
 float pitch, roll;
 
 int16_t ax, ay, az;
-float Volt, Temperatur, Tilt, Gravity;
-// , corrGravity;
+float Volt, Temperatur, Tilt, Gravity; // , corrGravity;
+
 
 bool DSrequested = false;
 
@@ -102,6 +108,20 @@ void SerialOut(const T aValue, bool newLine = true)
 }
 
 void SerialOut() { SerialOut(""); }
+
+float scaleTemperature(float t)
+{
+  if (my_tempscale == TEMP_CELSIUS)
+     return t;
+  else if (my_tempscale == TEMP_FAHRENHEIT)
+    return (1.8f*t+32);
+  else if (my_tempscale == TEMP_KELVIN)
+    return t + 273.15f;
+  else
+    return t; // Invalid value for my_tempscale => default to celsius
+
+
+}
 
 // callback notifying us of the need to save config
 void saveConfigCallback()
@@ -164,8 +184,13 @@ bool readConfig()
             my_port = json["Port"];
           if (json.containsKey("URL"))
             strcpy(my_url, json["URL"]);
+          if (json.containsKey("DB"))
+            strcpy(my_db, json["DB"]);
           if (json.containsKey("Vfact"))
             my_vfact = json["Vfact"];
+          if (json.containsKey("TS"))
+            my_tempscale = json["TS"];
+
 
           if (json.containsKey("SSID"))
             my_ssid = (const char *)json["SSID"];
@@ -361,13 +386,22 @@ bool startConfiguration()
                                    String(my_port).c_str(), TKIDSIZE,
                                    TYPE_NUMBER);
   WiFiManagerParameter custom_url("url", "Server URL", my_url, TKIDSIZE);
+  WiFiManagerParameter custom_db("db", "InfluxDB db", my_db, TKIDSIZE);
   WiFiManagerParameter custom_vfact("vfact", "Battery conversion factor",
                                     String(my_vfact).c_str(), 7, TYPE_NUMBER);
+  WiFiManagerParameter tempscale_list(HTTP_TEMPSCALE_LIST);
+  WiFiManagerParameter custom_tempscale("tempscale", "tempscale",
+                                         String(my_tempscale).c_str(),
+                                         5, TYPE_HIDDEN, WFM_NO_LABEL);
 
   wifiManager.addParameter(&custom_name);
   wifiManager.addParameter(&custom_sleep);
   wifiManager.addParameter(&custom_vfact);
 
+  WiFiManagerParameter custom_tempscale_hint("<label for=\"TS\">Unit of temperature</label>");
+  wifiManager.addParameter(&custom_tempscale_hint);
+  wifiManager.addParameter(&tempscale_list);
+  wifiManager.addParameter(&custom_tempscale);
   WiFiManagerParameter custom_api_hint("<hr><label for=\"API\">Service Type</label>");
   wifiManager.addParameter(&custom_api_hint);
 
@@ -378,6 +412,7 @@ bool startConfiguration()
   wifiManager.addParameter(&custom_server);
   wifiManager.addParameter(&custom_port);
   wifiManager.addParameter(&custom_url);
+  wifiManager.addParameter(&custom_db);
   WiFiManagerParameter custom_polynom_lbl("<hr><label for=\"POLYN\">Gravity conversion<br/>ex. \"0.00438*(tilt)*(tilt) + 0.13647*(tilt) - 6.96\"</label>");
   wifiManager.addParameter(&custom_polynom_lbl);
   WiFiManagerParameter custom_polynom("POLYN", "Polynominal", htmlencode(my_polynominal).c_str(), 70, WFM_NO_LABEL);
@@ -394,10 +429,12 @@ bool startConfiguration()
   validateInput(custom_name.getValue(), my_name);
   validateInput(custom_token.getValue(), my_token);
   validateInput(custom_server.getValue(), my_server);
+  validateInput(custom_db.getValue(), my_db);
   my_sleeptime = String(custom_sleep.getValue()).toInt();
 
   my_api = String(custom_api.getValue()).toInt();
   my_port = String(custom_port.getValue()).toInt();
+  my_tempscale = String(custom_tempscale.getValue()).toInt();
   validateInput(custom_url.getValue(), my_url);
 
   String tmp = custom_vfact.getValue();
@@ -448,7 +485,9 @@ bool saveConfig()
   json["API"] = my_api;
   json["Port"] = my_port;
   json["URL"] = my_url;
+  json["DB"] = my_db;
   json["Vfact"] = my_vfact;
+  json["TS"] = my_tempscale;
 
   // Store current Wifi credentials
   json["SSID"] = WiFi.SSID();
@@ -486,13 +525,28 @@ bool uploadData(uint8_t service)
   if (service == DTUbiDots)
   {
     sender.add("tilt", Tilt);
-    sender.add("temperature", Temperatur);
+    sender.add("temperature", scaleTemperature(Temperatur));
     sender.add("battery", Volt);
     sender.add("gravity", Gravity);
     sender.add("interval", my_sleeptime);
     sender.add("RSSI", WiFi.RSSI());
     SerialOut(F("\ncalling Ubidots"), true);
     return sender.sendUbidots(my_token, my_name);
+  }
+#endif
+
+#ifdef API_INFLUXDB
+  if (service == DTInfluxDB)
+  {
+    sender.add("tilt", Tilt);
+    sender.add("temperature", scaleTemperature(Temperatur));
+    sender.add("battery", Volt);
+    sender.add("gravity", Gravity);
+    sender.add("interval", my_sleeptime);
+    sender.add("RSSI", WiFi.RSSI());
+    SerialOut(F("\ncalling InfluxDB"), true);
+    Serial.println(String("Sending to db: ") + my_db);
+    return sender.sendInfluxDB(my_server, my_port, my_db, my_name);
   }
 #endif
 
@@ -505,7 +559,7 @@ bool uploadData(uint8_t service)
     if (my_token[0] != 0)
       sender.add("token", my_token);
     sender.add("angle", Tilt);
-    sender.add("temperature", Temperatur);
+    sender.add("temperature", scaleTemperature(Temperatur));
     sender.add("battery", Volt);
     sender.add("gravity", Gravity);
     sender.add("interval", my_sleeptime);
@@ -540,7 +594,7 @@ bool uploadData(uint8_t service)
   if (service == DTFHEM)
   {
     sender.add("angle", Tilt);
-    sender.add("temperature", Temperatur);
+    sender.add("temperature", scaleTemperature(Temperatur));
     sender.add("battery", Volt);
     sender.add("gravity", Gravity);
     sender.add("ID", ESP.getChipId());
@@ -551,7 +605,7 @@ bool uploadData(uint8_t service)
 #ifdef API_TCONTROL
   if (service == DTTcontrol)
   {
-    sender.add("T", Temperatur);
+    sender.add("T", scaleTemperature(Temperatur));
     sender.add("D", Tilt);
     sender.add("U", Volt);
     sender.add("G", Gravity);
