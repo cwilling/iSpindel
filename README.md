@@ -1,5 +1,4 @@
-## Please note that this personal fork of the iSpindel project is now being
-## tracked through my [GitLab account](https://gitlab.com/chris.willing/iSpindel)
+#### Please note that this personal fork of the iSpindel project is now being tracked through my [GitLab account](https://gitlab.com/chris.willing/iSpindel)
 
 # iSpindel - *DIY electronic Hydrometer*
 # [www.ispindel.de](http://www.ispindel.de)
